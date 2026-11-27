@@ -134,11 +134,22 @@ export function useTaskStream(): { tasks: DownloadTask[]; connected: boolean } {
 
   useEffect(() => {
     let alive = true;
-    api<{ tasks: DownloadTask[] }>('/api/tasks')
-      .then((d) => {
-        if (alive) setTasks(d.tasks ?? []);
-      })
-      .catch(() => undefined);
+
+    const load = () => {
+      api<{ tasks: DownloadTask[] }>('/api/tasks')
+        .then((d) => {
+          if (!alive) return;
+          setTasks(d.tasks ?? []);
+          setConnected(true);
+        })
+        .catch(() => {
+          if (alive) setConnected(false);
+        });
+    };
+
+    load();
+    // 飞牛统一网关可能断开长连接 SSE，轮询作为兜底
+    const timer = window.setInterval(load, 3000);
 
     const es = new EventSource(appUrl('/api/events'));
     es.onopen = () => setConnected(true);
@@ -146,13 +157,17 @@ export function useTaskStream(): { tasks: DownloadTask[]; connected: boolean } {
     es.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data) as { tasks?: DownloadTask[] };
-        if (Array.isArray(data.tasks)) setTasks(data.tasks);
+        if (Array.isArray(data.tasks)) {
+          setTasks(data.tasks);
+          setConnected(true);
+        }
       } catch {
         // 忽略坏消息
       }
     };
     return () => {
       alive = false;
+      window.clearInterval(timer);
       es.close();
     };
   }, []);

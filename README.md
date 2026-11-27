@@ -70,7 +70,7 @@ UI 中只能选择 `DOWNLOAD_ROOTS` 下的子目录，避免路径逃逸。
 ### 安装
 
 1. 在飞牛「应用中心」安装 **Node.js v22**（分类：开发工具），本项目依赖该运行时。
-2. 下载 [release/lexiangtv-1.0.2.fpk](release/lexiangtv-1.0.2.fpk)，或自行构建（见下）。
+2. 下载 [release/lexiangtv-1.0.3.fpk](release/lexiangtv-1.0.3.fpk)，或自行构建（见下）。
 3. 飞牛桌面 → 应用中心 → 右上角「设置」→「手动安装应用」，选择 `.fpk` 文件。
 4. 安装完成后，飞牛桌面会出现「乐享TV」图标，点开即可使用。
 

@@ -1,5 +1,5 @@
 appname=lexiangtv
-version=1.0.2
+version=1.0.3
 display_name=乐享TV
 desc=<b>乐享TV</b>：影视聚合搜索与 m3u8 下载器。支持 TVBox 接口、多线路选集、1-64 线程下载与自动合并 MP4。本软件仅用于个人学习与技术研究，不提供任何影视资源；请于下载后 24 小时内删除，本人不承担任何法律责任。
 source=thirdparty
@@ -15,4 +15,4 @@ ctl_stop=true
 checkport=false
 disable_authorization_path=false
 install_dep_apps=nodejs_v22
-changelog=1.0.2：优化飞牛下载目录说明文案；1.0.1：支持飞牛授权目录回传与自定义根目录；1.0.0：首个版本。
+changelog=1.0.3：任务进度增加轮询兜底，适配飞牛网关长连接限制；1.0.2：优化下载目录说明；1.0.1：支持授权目录与自定义根目录；1.0.0：首个版本。

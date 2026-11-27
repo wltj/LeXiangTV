@@ -26483,7 +26483,15 @@ function createApp() {
   const publicDir = [path4.join(baseDir, "public"), path4.join(baseDir, "..", "dist", "public")].find(
     (p) => fs4.existsSync(p)
   ) ?? path4.join(baseDir, "public");
-  app2.use(import_express.default.static(publicDir, { index: "index.html", maxAge: "1h" }));
+  app2.use(
+    import_express.default.static(publicDir, {
+      index: "index.html",
+      maxAge: "1h",
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith("index.html")) res.setHeader("Cache-Control", "no-cache");
+      }
+    })
+  );
   app2.use((req, res, next) => {
     if (req.method === "GET" && !req.path.startsWith("/api/")) {
       const indexFile = path4.join(publicDir, "index.html");

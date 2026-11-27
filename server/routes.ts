@@ -315,7 +315,15 @@ export function createApp(): Express {
   const publicDir = [path.join(baseDir, 'public'), path.join(baseDir, '..', 'dist', 'public')].find((p) =>
     fs.existsSync(p),
   ) ?? path.join(baseDir, 'public');
-  app.use(express.static(publicDir, { index: 'index.html', maxAge: '1h' }));
+  app.use(
+    express.static(publicDir, {
+      index: 'index.html',
+      maxAge: '1h',
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
+      },
+    }),
+  );
 
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api/')) {
