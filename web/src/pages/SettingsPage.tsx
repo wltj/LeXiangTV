@@ -161,8 +161,8 @@ export function SettingsPage() {
               <Server className="h-4 w-4 text-emerald-300" /> TBox 接口
             </h2>
             <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-slate-500">
-              支持 TVBox 单仓 JSON（sites）、多仓（urls），也可以直接填写苹果CMS 采集接口（形如 /api.php/provide/vod）。
-              保存后搜索会自动加载所有启用的站点。
+              支持 TVBox 单仓 JSON（sites）、多仓（urls）、Base64 / 图片隐写 / 2423 加密配置，也可以直接填写苹果CMS 采集接口。
+              Spider（csp_ / jar）型站点需要独立运行环境，当前版本暂不支持；保存后搜索会自动加载所有启用的站点。
             </p>
           </div>
           <div className="flex gap-2">

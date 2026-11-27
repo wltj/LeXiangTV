@@ -17,6 +17,7 @@
 一个部署在 NAS（如飞牛 OS / Debian）上的影视聚合搜索与 HLS(m3u8) 下载工具：
 
 - 兼容 TVBox 单仓（`sites`）/ 多仓（`urls`）接口，也可直接填写苹果CMS 采集接口
+- 兼容 TVBox 常见配置编码：Base64、图片隐写（JPEG/PNG 尾部）、FongMi `2423` AES 加密，使用 OkHttp UA 拉取
 - 聚合搜索电影、电视剧、综艺、动漫，支持多线路、多清晰度
 - m3u8 分片并发下载，线程 1 - 64 可调
 - 支持 AES-128 加密流、`EXT-X-MAP`（fMP4）、`BYTERANGE`
@@ -70,7 +71,7 @@ UI 中只能选择 `DOWNLOAD_ROOTS` 下的子目录，避免路径逃逸。
 ### 安装
 
 1. 在飞牛「应用中心」安装 **Node.js v22**（分类：开发工具），本项目依赖该运行时。
-2. 下载 [release/lexiangtv-1.0.3.fpk](release/lexiangtv-1.0.3.fpk)，或自行构建（见下）。
+2. 下载 [release/lexiangtv-1.0.4.fpk](release/lexiangtv-1.0.4.fpk)，或自行构建（见下）。
 3. 飞牛桌面 → 应用中心 → 右上角「设置」→「手动安装应用」，选择 `.fpk` 文件。
 4. 安装完成后，飞牛桌面会出现「乐享TV」图标，点开即可使用。
 

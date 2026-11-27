@@ -19469,14 +19469,14 @@ var require_etag = __commonJS({
   "node_modules/etag/index.js"(exports, module) {
     "use strict";
     module.exports = etag;
-    var crypto2 = __require("crypto");
+    var crypto3 = __require("crypto");
     var Stats = __require("fs").Stats;
     var toString = Object.prototype.toString;
     function entitytag(entity) {
       if (entity.length === 0) {
         return '"0-2jmj7l5rSw0yVb/vlWAYkK/YBwk"';
       }
-      var hash = crypto2.createHash("sha1").update(entity, "utf8").digest("base64").substring(0, 27);
+      var hash = crypto3.createHash("sha1").update(entity, "utf8").digest("base64").substring(0, 27);
       var len = typeof entity === "string" ? Buffer.byteLength(entity, "utf8") : entity.length;
       return '"' + len.toString(16) + "-" + hash + '"';
     }
@@ -23235,17 +23235,17 @@ var require_dist3 = __commonJS({
 // node_modules/cookie-signature/index.js
 var require_cookie_signature = __commonJS({
   "node_modules/cookie-signature/index.js"(exports) {
-    var crypto2 = __require("crypto");
+    var crypto3 = __require("crypto");
     exports.sign = function(val, secret) {
       if ("string" != typeof val) throw new TypeError("Cookie value must be provided as a string.");
       if (null == secret) throw new TypeError("Secret key must be provided.");
-      return val + "." + crypto2.createHmac("sha256", secret).update(val).digest("base64").replace(/\=+$/, "");
+      return val + "." + crypto3.createHmac("sha256", secret).update(val).digest("base64").replace(/\=+$/, "");
     };
     exports.unsign = function(input, secret) {
       if ("string" != typeof input) throw new TypeError("Signed cookie string must be provided.");
       if (null == secret) throw new TypeError("Secret key must be provided.");
       var tentativeValue = input.slice(0, input.lastIndexOf(".")), expectedInput = exports.sign(tentativeValue, secret), expectedBuffer = Buffer.from(expectedInput), inputBuffer = Buffer.from(input);
-      return expectedBuffer.length === inputBuffer.length && crypto2.timingSafeEqual(expectedBuffer, inputBuffer) ? tentativeValue : false;
+      return expectedBuffer.length === inputBuffer.length && crypto3.timingSafeEqual(expectedBuffer, inputBuffer) ? tentativeValue : false;
     };
   }
 });
@@ -24911,12 +24911,182 @@ function getPresets() {
 }
 
 // server/tvbox.ts
+import crypto from "node:crypto";
 var registry = /* @__PURE__ */ new Map();
 var cacheKey = "";
 var cacheAt = 0;
 var cacheResult = null;
 var loading = null;
 var CACHE_TTL = 10 * 60 * 1e3;
+var CONFIG_UA = "okhttp/3.12.0";
+function pad16(value) {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.length > 16) throw new Error("\u5BC6\u94A5\u957F\u5EA6\u8D85\u8FC7 16 \u5B57\u8282");
+  return Buffer.concat([bytes, Buffer.from("0".repeat(16 - bytes.length), "utf8")]);
+}
+function decodeFongMi2423(text) {
+  const hex = text.replace(/\s+/g, "").toLowerCase();
+  if (!/^[0-9a-f]+$/.test(hex) || !hex.startsWith("2423")) throw new Error("\u4E0D\u662F 2423 \u683C\u5F0F");
+  const sepAt = hex.indexOf("2324");
+  if (sepAt < 0 || hex.length <= sepAt + 4 + 26) throw new Error("2423 \u683C\u5F0F\u4E0D\u5B8C\u6574");
+  const raw = Buffer.from(hex, "hex");
+  const dec = raw.toString("utf8").toLowerCase();
+  const dollar = dec.indexOf("#$");
+  if (dollar < 0) throw new Error("2423 \u683C\u5F0F\u7F3A\u5C11 #$ \u5206\u9694\u7B26");
+  const key = pad16(dec.slice(2, dollar));
+  const iv = pad16(dec.slice(-13));
+  const cipherText = Buffer.from(hex.slice(sepAt + 4, hex.length - 26), "hex");
+  const decipher = crypto.createDecipheriv("aes-128-cbc", key, iv);
+  return Buffer.concat([decipher.update(cipherText), decipher.final()]).toString("utf8");
+}
+function extractImagePayload(buf) {
+  if (buf.length > 4 && buf[0] === 255 && buf[1] === 216) {
+    const end = buf.lastIndexOf(Buffer.from([255, 217]));
+    if (end >= 2 && end + 2 < buf.length) return buf.subarray(end + 2);
+    return null;
+  }
+  if (buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    const end = buf.lastIndexOf(Buffer.from([73, 69, 78, 68, 174, 66, 96, 130]));
+    if (end >= 0 && end + 8 < buf.length) return buf.subarray(end + 8);
+  }
+  return null;
+}
+function looksBase64(text) {
+  const t = text.trim();
+  return t.length >= 64 && /^[A-Za-z0-9+/=\s]+$/.test(t);
+}
+function base64Buffer(text) {
+  const clean = text.replace(/[^A-Za-z0-9+/=]/g, "");
+  return Buffer.from(clean + "=".repeat((4 - clean.length % 4) % 4), "base64");
+}
+function stripJsonComments(input) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i];
+    const n = input[i + 1];
+    if (lineComment) {
+      if (c === "\n") {
+        lineComment = false;
+        out += c;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (c === "*" && n === "/") {
+        blockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inString) {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+      continue;
+    }
+    if (c === "/" && n === "/") {
+      lineComment = true;
+      i++;
+      continue;
+    }
+    if (c === "/" && n === "*") {
+      blockComment = true;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+function parseConfigJson(text) {
+  const stripped = stripJsonComments(text).replace(/^\uFEFF/, "").trim();
+  if (!stripped) return null;
+  const starts = [stripped.indexOf("{"), stripped.indexOf("[")].filter((i) => i >= 0);
+  if (!starts.length) return null;
+  const body = stripped.slice(Math.min(...starts));
+  try {
+    return JSON.parse(body);
+  } catch {
+    try {
+      return parseLooseJson(body);
+    } catch {
+      return null;
+    }
+  }
+}
+async function decodeConfigPayload(buf, contentType) {
+  let work = buf;
+  for (let depth = 0; depth < 6; depth++) {
+    if (Buffer.isBuffer(work)) {
+      const inner = extractImagePayload(work);
+      if (inner) {
+        work = inner;
+        continue;
+      }
+      work = decodeBuffer(work, contentType).replace(/^\uFEFF/, "");
+    }
+    const text = String(work).replace(/^\uFEFF/, "").trim();
+    if (!text) throw new Error("\u63A5\u53E3\u8FD4\u56DE\u5185\u5BB9\u4E3A\u7A7A");
+    if (/^2423[0-9a-f]+$/i.test(text.replace(/\s+/g, ""))) {
+      work = decodeFongMi2423(text);
+      continue;
+    }
+    const star = text.indexOf("**");
+    if (star >= 0) {
+      const rest = text.slice(star + 2);
+      if (looksBase64(rest)) {
+        const decoded = base64Buffer(rest);
+        const asText = decoded.toString("utf8");
+        if (parseConfigJson(asText) || /^2423/i.test(asText.trim()) || decoded[0] === 255 || decoded[0] === 137) {
+          work = decoded;
+          continue;
+        }
+      }
+    }
+    if (looksBase64(text)) {
+      const decoded = base64Buffer(text);
+      const asText = decoded.toString("utf8");
+      if (parseConfigJson(asText) || /^2423/i.test(asText.trim()) || decoded[0] === 255 || decoded[0] === 137) {
+        work = decoded;
+        continue;
+      }
+    }
+    const parsed = parseConfigJson(text);
+    if (parsed) return parsed;
+    if (/<html|<!doctype|<body/i.test(text.slice(0, 512))) {
+      throw new Error("\u63A5\u53E3\u8FD4\u56DE\u7684\u662F\u7F51\u9875\u5BFC\u822A\u9875\uFF0C\u4E0D\u662F TVBox \u914D\u7F6E\u6587\u4EF6\uFF1B\u8BF7\u586B\u5199\u9875\u9762\u91CC\u7684 .json \u914D\u7F6E\u5730\u5740");
+    }
+    throw new Error("\u63A5\u53E3\u8FD4\u56DE\u7684\u4E0D\u662F TVBox \u914D\u7F6E JSON\uFF08\u4E5F\u4E0D\u662F\u652F\u6301\u7684\u52A0\u5BC6/\u9690\u5199\u683C\u5F0F\uFF09");
+  }
+  throw new Error("\u63A5\u53E3\u5185\u5BB9\u7F16\u7801\u5C42\u6570\u8FC7\u591A\uFF0C\u6682\u4E0D\u652F\u6301");
+}
+async function fetchConfigJson(url, timeoutMs) {
+  let firstError = null;
+  const agents = [CONFIG_UA, settings.userAgent].filter((v, i, arr) => v && arr.indexOf(v) === i);
+  for (const ua of agents) {
+    try {
+      const res = await fetchRaw(url, {
+        headers: { "User-Agent": ua, Accept: "*/*" },
+        timeoutMs
+      });
+      const json = await decodeConfigPayload(res.buffer, res.contentType);
+      return { json, finalUrl: res.finalUrl };
+    } catch (err) {
+      if (!firstError) firstError = err;
+    }
+  }
+  throw firstError ?? new Error("\u62C9\u53D6\u914D\u7F6E\u5931\u8D25");
+}
 function shortHash(input) {
   let h = 2166136261;
   for (let i = 0; i < input.length; i++) {
@@ -24957,6 +25127,14 @@ function parseSiteList(rawSites, source) {
     const api = normalizeApi(raw.api ?? raw.url ?? raw.ext?.api);
     if (!api || !/^https?:\/\//i.test(api)) continue;
     if (!truthy(raw.searchable, true)) continue;
+    const typeLabel = typeof raw.type === "string" ? raw.type.toLowerCase() : "";
+    if (/spider|jar|html|web|rule|py|js/.test(typeLabel)) continue;
+    const typeNum = typeof raw.type === "number" ? raw.type : Number(raw.type);
+    if (typeNum === 0 || typeNum === 2 || typeNum === 3) {
+      const looksCms = /provide\/vod|api\.php|ac=/i.test(api);
+      if (!(typeNum === 3 && looksCms)) continue;
+    }
+    if (/\.(js|py|jar)(\?|$)/i.test(api)) continue;
     const key = shortHash(`${source.id}|${api}|${name}`);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -24978,16 +25156,34 @@ function looksLikeCmsPayload(json) {
   const j = json;
   return Array.isArray(j.list) || Array.isArray(j.class) || typeof j.code !== "undefined";
 }
+function noUsableSitesError(rawSites) {
+  const spider = rawSites.filter((item) => {
+    const raw = item ?? {};
+    const api = String(raw.api ?? "");
+    const type = Number(raw.type);
+    return !/^https?:\/\//i.test(api) || /^csp_/i.test(api) || type === 3;
+  }).length;
+  if (spider > 0) {
+    return new Error(
+      `\u8BE5\u63A5\u53E3\u662F Spider \u578B\u914D\u7F6E\uFF08${rawSites.length} \u4E2A\u7AD9\u70B9\u9700\u8981 jar/JS \u8FD0\u884C\u73AF\u5883\uFF09\uFF0C\u5F53\u524D\u7248\u672C\u4E0D\u652F\u6301\uFF0C\u8BF7\u6539\u7528\u76F4\u8FDE\u91C7\u96C6\u63A5\u53E3`
+    );
+  }
+  return new Error("\u914D\u7F6E\u91CC\u6CA1\u6709\u53EF\u7528\u7684\u641C\u7D22\u7AD9\u70B9");
+}
 async function parseOneConfig(json, source) {
   if (Array.isArray(json)) {
-    return { name: source.name, sites: parseSiteList(json, source) };
+    const sites = parseSiteList(json, source);
+    if (!sites.length && json.length) throw noUsableSitesError(json);
+    return { name: source.name, sites };
   }
   if (json && typeof json === "object") {
     const j = json;
     if (Array.isArray(j.sites)) {
+      const sites = parseSiteList(j.sites, source);
+      if (!sites.length && j.sites.length) throw noUsableSitesError(j.sites);
       return {
         name: String(j.name ?? source.name),
-        sites: parseSiteList(j.sites, source)
+        sites
       };
     }
     if (looksLikeCmsPayload(json) || /provide\/vod/i.test(source.url)) {
@@ -25009,26 +25205,7 @@ async function parseOneConfig(json, source) {
   throw new Error("\u6CA1\u6709\u627E\u5230 sites \u914D\u7F6E\uFF08\u4E0D\u50CF TVBox \u63A5\u53E3 JSON\uFF09");
 }
 async function loadOneSource(source) {
-  const res = await fetchText(source.url, {
-    headers: { "User-Agent": settings.userAgent },
-    timeoutMs: 12e3
-  });
-  let json;
-  try {
-    json = parseLooseJson(res.text);
-  } catch {
-    const compact = res.text.replace(/\s+/g, "");
-    if (/^[A-Za-z0-9+/=]+$/.test(compact)) {
-      try {
-        const decoded = Buffer.from(compact, "base64").toString("utf-8");
-        json = parseLooseJson(decoded);
-      } catch {
-        throw new Error("\u63A5\u53E3\u8FD4\u56DE\u7684\u4E0D\u662F JSON\uFF0C\u53EF\u80FD\u5DF2\u5931\u6548");
-      }
-    } else {
-      throw new Error("\u63A5\u53E3\u8FD4\u56DE\u7684\u4E0D\u662F JSON\uFF0C\u53EF\u80FD\u5DF2\u5931\u6548");
-    }
-  }
+  const { json } = await fetchConfigJson(source.url, 15e3);
   const first = await parseOneConfig(json, source);
   const multi = json && typeof json === "object" && Array.isArray(json.urls);
   if (!multi) return first;
@@ -25053,11 +25230,7 @@ async function loadOneSource(source) {
   return { name: first.name, sites };
 }
 async function loadSubConfig(url, source) {
-  const res = await fetchText(url, {
-    headers: { "User-Agent": settings.userAgent },
-    timeoutMs: 1e4
-  });
-  const json = parseLooseJson(res.text);
+  const { json } = await fetchConfigJson(url, 12e3);
   return parseOneConfig(json, source);
 }
 async function loadSites(force = false) {
@@ -25646,7 +25819,7 @@ function allTsPlain(plan) {
 import fs3 from "node:fs";
 import fsp2 from "node:fs/promises";
 import path3 from "node:path";
-import crypto from "node:crypto";
+import crypto2 from "node:crypto";
 import { execFile } from "node:child_process";
 var PauseError = class extends Error {
   constructor() {
@@ -25731,7 +25904,7 @@ function createTask(input) {
   resolveInRoot(root, subdir);
   const name = sanitizeName(String(input.name || guessName(url)), "\u672A\u547D\u540D");
   const task = {
-    id: crypto.randomUUID(),
+    id: crypto2.randomUUID(),
     url,
     name,
     fileName: sanitizeName(String(input.fileName || name), "\u672A\u547D\u540D"),

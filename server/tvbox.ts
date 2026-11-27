@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type {
   Line,
   SearchEvent,
@@ -6,7 +7,7 @@ import type {
   SourceTestResult,
   VodDetail,
 } from '../shared/types.ts';
-import { fetchJson, fetchText, parseLooseJson } from './http.ts';
+import { decodeBuffer, fetchRaw, fetchText, parseLooseJson } from './http.ts';
 import { settings } from './store.ts';
 
 export interface SiteRecord extends SiteInfo {
@@ -20,6 +21,208 @@ let cacheResult: { sites: SiteRecord[]; errors: Array<{ sourceId: string; name: 
 let loading: Promise<{ sites: SiteRecord[]; errors: Array<{ sourceId: string; name: string; error: string }> }> | null = null;
 
 const CACHE_TTL = 10 * 60 * 1000;
+const CONFIG_UA = 'okhttp/3.12.0';
+
+function pad16(value: string): Buffer {
+  const bytes = Buffer.from(value, 'utf8');
+  if (bytes.length > 16) throw new Error('密钥长度超过 16 字节');
+  return Buffer.concat([bytes, Buffer.from('0'.repeat(16 - bytes.length), 'utf8')]);
+}
+
+/** FongMi TV 的 2423 配置格式：$#key#$ + AES-128-CBC 密文 + 13 位 IV（key/IV 右补字符 0） */
+export function decodeFongMi2423(text: string): string {
+  const hex = text.replace(/\s+/g, '').toLowerCase();
+  if (!/^[0-9a-f]+$/.test(hex) || !hex.startsWith('2423')) throw new Error('不是 2423 格式');
+  const sepAt = hex.indexOf('2324');
+  if (sepAt < 0 || hex.length <= sepAt + 4 + 26) throw new Error('2423 格式不完整');
+  const raw = Buffer.from(hex, 'hex');
+  const dec = raw.toString('utf8').toLowerCase();
+  const dollar = dec.indexOf('#$');
+  if (dollar < 0) throw new Error('2423 格式缺少 #$ 分隔符');
+  const key = pad16(dec.slice(2, dollar));
+  const iv = pad16(dec.slice(-13));
+  const cipherText = Buffer.from(hex.slice(sepAt + 4, hex.length - 26), 'hex');
+  const decipher = crypto.createDecipheriv('aes-128-cbc', key, iv);
+  return Buffer.concat([decipher.update(cipherText), decipher.final()]).toString('utf8');
+}
+
+/** 提取图片隐写内容：配置常被附加在 JPEG EOI / PNG IEND 之后 */
+function extractImagePayload(buf: Buffer): Buffer | null {
+  if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    const end = buf.lastIndexOf(Buffer.from([0xff, 0xd9]));
+    if (end >= 2 && end + 2 < buf.length) return buf.subarray(end + 2);
+    return null;
+  }
+  if (
+    buf.length > 8 &&
+    buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) {
+    const end = buf.lastIndexOf(Buffer.from([0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]));
+    if (end >= 0 && end + 8 < buf.length) return buf.subarray(end + 8);
+  }
+  return null;
+}
+
+function looksBase64(text: string): boolean {
+  const t = text.trim();
+  return t.length >= 64 && /^[A-Za-z0-9+/=\s]+$/.test(t);
+}
+
+function base64Buffer(text: string): Buffer {
+  const clean = text.replace(/[^A-Za-z0-9+/=]/g, '');
+  return Buffer.from(clean + '='.repeat((4 - (clean.length % 4)) % 4), 'base64');
+}
+
+function stripJsonComments(input: string): string {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i];
+    const n = input[i + 1];
+    if (lineComment) {
+      if (c === '\n') {
+        lineComment = false;
+        out += c;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (c === '*' && n === '/') {
+        blockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inString) {
+      out += c;
+      if (escaped) escaped = false;
+      else if (c === '\\') escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      out += c;
+      continue;
+    }
+    if (c === '/' && n === '/') {
+      lineComment = true;
+      i++;
+      continue;
+    }
+    if (c === '/' && n === '*') {
+      blockComment = true;
+      i++;
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+function parseConfigJson(text: string): unknown | null {
+  const stripped = stripJsonComments(text).replace(/^\uFEFF/, '').trim();
+  if (!stripped) return null;
+  const starts = [stripped.indexOf('{'), stripped.indexOf('[')].filter((i) => i >= 0);
+  if (!starts.length) return null;
+  const body = stripped.slice(Math.min(...starts));
+  try {
+    return JSON.parse(body);
+  } catch {
+    try {
+      return parseLooseJson(body);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function decodeConfigPayload(buf: Buffer, contentType: string): Promise<unknown> {
+  let work: Buffer | string = buf;
+  for (let depth = 0; depth < 6; depth++) {
+    if (Buffer.isBuffer(work)) {
+      const inner = extractImagePayload(work);
+      if (inner) {
+        work = inner;
+        continue;
+      }
+      work = decodeBuffer(work, contentType).replace(/^\uFEFF/, '');
+    }
+    const text = String(work).replace(/^\uFEFF/, '').trim();
+    if (!text) throw new Error('接口返回内容为空');
+
+    if (/^2423[0-9a-f]+$/i.test(text.replace(/\s+/g, ''))) {
+      work = decodeFongMi2423(text);
+      continue;
+    }
+
+    // 图片隐写常见：随机前缀 + ** + Base64(JSON)
+    const star = text.indexOf('**');
+    if (star >= 0) {
+      const rest = text.slice(star + 2);
+      if (looksBase64(rest)) {
+        const decoded = base64Buffer(rest);
+        const asText = decoded.toString('utf8');
+        if (
+          parseConfigJson(asText) ||
+          /^2423/i.test(asText.trim()) ||
+          decoded[0] === 0xff ||
+          decoded[0] === 0x89
+        ) {
+          work = decoded;
+          continue;
+        }
+      }
+    }
+
+    if (looksBase64(text)) {
+      const decoded = base64Buffer(text);
+      const asText = decoded.toString('utf8');
+      if (
+        parseConfigJson(asText) ||
+        /^2423/i.test(asText.trim()) ||
+        decoded[0] === 0xff ||
+        decoded[0] === 0x89
+      ) {
+        work = decoded;
+        continue;
+      }
+    }
+
+    const parsed = parseConfigJson(text);
+    if (parsed) return parsed;
+
+    if (/<html|<!doctype|<body/i.test(text.slice(0, 512))) {
+      throw new Error('接口返回的是网页导航页，不是 TVBox 配置文件；请填写页面里的 .json 配置地址');
+    }
+    throw new Error('接口返回的不是 TVBox 配置 JSON（也不是支持的加密/隐写格式）');
+  }
+  throw new Error('接口内容编码层数过多，暂不支持');
+}
+
+async function fetchConfigJson(
+  url: string,
+  timeoutMs: number,
+): Promise<{ json: unknown; finalUrl: string }> {
+  let firstError: Error | null = null;
+  const agents = [CONFIG_UA, settings.userAgent].filter((v, i, arr) => v && arr.indexOf(v) === i);
+  for (const ua of agents) {
+    try {
+      const res = await fetchRaw(url, {
+        headers: { 'User-Agent': ua, Accept: '*/*' },
+        timeoutMs,
+      });
+      const json = await decodeConfigPayload(res.buffer, res.contentType);
+      return { json, finalUrl: res.finalUrl };
+    } catch (err) {
+      if (!firstError) firstError = err as Error;
+    }
+  }
+  throw firstError ?? new Error('拉取配置失败');
+}
 
 function shortHash(input: string): string {
   let h = 0x811c9dc5;
@@ -70,6 +273,17 @@ function parseSiteList(rawSites: unknown[], source: { id: string; name: string; 
     const api = normalizeApi(raw.api ?? raw.url ?? (raw.ext as Record<string, unknown> | undefined)?.api);
     if (!api || !/^https?:\/\//i.test(api)) continue;
     if (!truthy(raw.searchable, true)) continue;
+
+    const typeLabel = typeof raw.type === 'string' ? raw.type.toLowerCase() : '';
+    if (/spider|jar|html|web|rule|py|js/.test(typeLabel)) continue;
+    const typeNum = typeof raw.type === 'number' ? raw.type : Number(raw.type);
+    // FongMi: 0=xml, 1=json(CMS), 3=spider, 4=API；js/py 源也按 spider 处理
+    if (typeNum === 0 || typeNum === 2 || typeNum === 3) {
+      const looksCms = /provide\/vod|api\.php|ac=/i.test(api);
+      if (!(typeNum === 3 && looksCms)) continue;
+    }
+    if (/\.(js|py|jar)(\?|$)/i.test(api)) continue;
+
     const key = shortHash(`${source.id}|${api}|${name}`);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -93,16 +307,35 @@ function looksLikeCmsPayload(json: unknown): boolean {
   return Array.isArray(j.list) || Array.isArray(j.class) || typeof j.code !== 'undefined';
 }
 
+function noUsableSitesError(rawSites: unknown[]): Error {
+  const spider = rawSites.filter((item) => {
+    const raw = (item ?? {}) as Record<string, unknown>;
+    const api = String(raw.api ?? '');
+    const type = Number(raw.type);
+    return !/^https?:\/\//i.test(api) || /^csp_/i.test(api) || type === 3;
+  }).length;
+  if (spider > 0) {
+    return new Error(
+      `该接口是 Spider 型配置（${rawSites.length} 个站点需要 jar/JS 运行环境），当前版本不支持，请改用直连采集接口`,
+    );
+  }
+  return new Error('配置里没有可用的搜索站点');
+}
+
 async function parseOneConfig(json: unknown, source: { id: string; name: string; url: string }): Promise<ParsedConfig> {
   if (Array.isArray(json)) {
-    return { name: source.name, sites: parseSiteList(json, source) };
+    const sites = parseSiteList(json, source);
+    if (!sites.length && json.length) throw noUsableSitesError(json);
+    return { name: source.name, sites };
   }
   if (json && typeof json === 'object') {
     const j = json as Record<string, unknown>;
     if (Array.isArray(j.sites)) {
+      const sites = parseSiteList(j.sites, source);
+      if (!sites.length && j.sites.length) throw noUsableSitesError(j.sites);
       return {
         name: String(j.name ?? source.name),
-        sites: parseSiteList(j.sites, source),
+        sites,
       };
     }
     if (looksLikeCmsPayload(json) || /provide\/vod/i.test(source.url)) {
@@ -125,27 +358,7 @@ async function parseOneConfig(json: unknown, source: { id: string; name: string;
 }
 
 async function loadOneSource(source: { id: string; name: string; url: string }): Promise<ParsedConfig> {
-  const res = await fetchText(source.url, {
-    headers: { 'User-Agent': settings.userAgent },
-    timeoutMs: 12000,
-  });
-  let json: unknown;
-  try {
-    json = parseLooseJson(res.text);
-  } catch {
-    // 部分订阅以 base64 编码返回
-    const compact = res.text.replace(/\s+/g, '');
-    if (/^[A-Za-z0-9+/=]+$/.test(compact)) {
-      try {
-        const decoded = Buffer.from(compact, 'base64').toString('utf-8');
-        json = parseLooseJson(decoded);
-      } catch {
-        throw new Error('接口返回的不是 JSON，可能已失效');
-      }
-    } else {
-      throw new Error('接口返回的不是 JSON，可能已失效');
-    }
-  }
+  const { json } = await fetchConfigJson(source.url, 15000);
   const first = await parseOneConfig(json, source);
   const multi = json && typeof json === 'object' && Array.isArray((json as Record<string, unknown>).urls);
   if (!multi) return first;
@@ -175,11 +388,7 @@ async function loadOneSource(source: { id: string; name: string; url: string }):
 }
 
 async function loadSubConfig(url: string, source: { id: string; name: string; url: string }): Promise<ParsedConfig> {
-  const res = await fetchText(url, {
-    headers: { 'User-Agent': settings.userAgent },
-    timeoutMs: 10000,
-  });
-  const json = parseLooseJson(res.text);
+  const { json } = await fetchConfigJson(url, 12000);
   return parseOneConfig(json, source);
 }
 
