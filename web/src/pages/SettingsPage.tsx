@@ -380,7 +380,8 @@ export function SettingsPage() {
               ))}
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-slate-600">
-              仅能选择这些根目录下的文件夹。NAS 部署时把宿主机影视目录挂载到容器内即可。
+              仅能选择这些根目录下的文件夹。Docker 部署请把宿主机目录挂载到容器内；
+              飞牛应用可在应用设置中授权目录，或通过 extra-roots 配置添加。
             </p>
           </div>
         </div>

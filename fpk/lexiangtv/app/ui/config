@@ -1,0 +1,14 @@
+{
+  ".url": {
+    "lexiangtv.main": {
+      "title": "乐享TV",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/lexiangtv",
+      "gatewaySocket": "app.sock",
+      "url": "/app/lexiangtv/",
+      "allUsers": true
+    }
+  }
+}

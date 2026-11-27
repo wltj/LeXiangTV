@@ -19376,7 +19376,7 @@ var require_view = __commonJS({
     "use strict";
     var debug = require_src()("express:view");
     var path5 = __require("node:path");
-    var fs5 = __require("node:fs");
+    var fs6 = __require("node:fs");
     var dirname = path5.dirname;
     var basename = path5.basename;
     var extname = path5.extname;
@@ -19456,7 +19456,7 @@ var require_view = __commonJS({
     function tryStat(path6) {
       debug('stat "%s"', path6);
       try {
-        return fs5.statSync(path6);
+        return fs6.statSync(path6);
       } catch (e) {
         return void 0;
       }
@@ -23426,7 +23426,7 @@ var require_send = __commonJS({
     var escapeHtml = require_escape_html();
     var etag = require_etag();
     var fresh = require_fresh();
-    var fs5 = __require("fs");
+    var fs6 = __require("fs");
     var mime = require_mime_types();
     var ms = require_ms();
     var onFinished = require_on_finished();
@@ -23708,7 +23708,7 @@ var require_send = __commonJS({
       var i = 0;
       var self = this;
       debug('stat "%s"', path6);
-      fs5.stat(path6, function onstat(err, stat) {
+      fs6.stat(path6, function onstat(err, stat) {
         var pathEndsWithSep = path6[path6.length - 1] === sep;
         if (err && err.code === "ENOENT" && !extname(path6) && !pathEndsWithSep) {
           return next(err);
@@ -23725,7 +23725,7 @@ var require_send = __commonJS({
         }
         var p = path6 + "." + self._extensions[i++];
         debug('stat "%s"', p);
-        fs5.stat(p, function(err2, stat) {
+        fs6.stat(p, function(err2, stat) {
           if (err2) return next(err2);
           if (stat.isDirectory()) return next();
           self.emit("file", p, stat);
@@ -23743,7 +23743,7 @@ var require_send = __commonJS({
         }
         var p = join(path6, self._index[i]);
         debug('stat "%s"', p);
-        fs5.stat(p, function(err2, stat) {
+        fs6.stat(p, function(err2, stat) {
           if (err2) return next(err2);
           if (stat.isDirectory()) return next();
           self.emit("file", p, stat);
@@ -23755,7 +23755,7 @@ var require_send = __commonJS({
     SendStream.prototype.stream = function stream(path6, options) {
       var self = this;
       var res = this.res;
-      var stream2 = fs5.createReadStream(path6, options);
+      var stream2 = fs6.createReadStream(path6, options);
       this.emit("stream", stream2);
       stream2.pipe(res);
       function cleanup() {
@@ -24593,6 +24593,9 @@ var require_express2 = __commonJS({
     module.exports = require_express();
   }
 });
+
+// server/main.ts
+import fs5 from "node:fs";
 
 // server/routes.ts
 var import_express = __toESM(require_express2(), 1);
@@ -26217,6 +26220,17 @@ function fileExt(url, contentType) {
 function createApp() {
   const app2 = (0, import_express.default)();
   app2.disable("x-powered-by");
+  const gatewayPrefix = (process.env.GATEWAY_PREFIX || "").replace(/\/+$/, "");
+  if (gatewayPrefix) {
+    app2.use((req, _res, next) => {
+      const url = req.url;
+      if (url === gatewayPrefix || url.startsWith(`${gatewayPrefix}/`) || url.startsWith(`${gatewayPrefix}?`)) {
+        const rest = url.slice(gatewayPrefix.length);
+        req.url = rest === "" ? "/" : rest.startsWith("?") ? `/${rest}` : rest;
+      }
+      next();
+    });
+  }
   app2.use(import_express.default.json({ limit: "4mb" }));
   app2.get("/api/health", (_req, res) => {
     res.json({ ok: true });
@@ -26503,18 +26517,45 @@ function isPrivateHost(hostname) {
 }
 
 // server/main.ts
-var PORT = Number(process.env.PORT) || 8099;
+var PORT = Number(process.env.TCP_PORT || process.env.PORT) || 0;
 var HOST = process.env.HOST || "0.0.0.0";
+var SOCKET_PATH = process.env.SOCKET_PATH || "";
 initStore();
 await initDownloader();
 var app = createApp();
-app.listen(PORT, HOST, () => {
-  console.log(`[\u98DE\u5F71] \u670D\u52A1\u5DF2\u542F\u52A8: http://${HOST}:${PORT}`);
-  console.log(`[\u98DE\u5F71] \u4E0B\u8F7D\u6839\u76EE\u5F55: ${ROOTS.join(", ")}`);
-  console.log(`[\u98DE\u5F71] \u6570\u636E\u76EE\u5F55: ${DATA_DIR}`);
-  console.log(`[\u98DE\u5F71] \u4EFB\u52A1\u6570: ${tasks.length}`);
-  void loadSites().catch(() => void 0);
-});
+if (SOCKET_PATH) {
+  try {
+    fs5.rmSync(SOCKET_PATH, { force: true });
+  } catch {
+  }
+  const server = app.listen(SOCKET_PATH, () => {
+    try {
+      fs5.chmodSync(SOCKET_PATH, 511);
+    } catch {
+    }
+    console.log(`[\u98DE\u5F71] \u7EDF\u4E00\u7F51\u5173 Socket: ${SOCKET_PATH}`);
+  });
+  server.on("error", (err) => {
+    console.error("[\u98DE\u5F71] Socket \u76D1\u542C\u5931\u8D25", err);
+  });
+}
+if (PORT) {
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`[\u98DE\u5F71] \u670D\u52A1\u5DF2\u542F\u52A8: http://${HOST}:${PORT}`);
+  });
+  server.on("error", (err) => {
+    console.error("[\u98DE\u5F71] \u7AEF\u53E3\u76D1\u542C\u5931\u8D25\uFF08\u53EF\u80FD\u5DF2\u88AB\u5360\u7528\uFF09", err);
+  });
+} else if (!SOCKET_PATH) {
+  const fallback = 8099;
+  app.listen(fallback, HOST, () => {
+    console.log(`[\u98DE\u5F71] \u670D\u52A1\u5DF2\u542F\u52A8: http://${HOST}:${fallback}`);
+  });
+}
+console.log(`[\u98DE\u5F71] \u4E0B\u8F7D\u6839\u76EE\u5F55: ${ROOTS.join(", ") || "(\u672A\u914D\u7F6E)"}`);
+console.log(`[\u98DE\u5F71] \u6570\u636E\u76EE\u5F55: ${DATA_DIR}`);
+console.log(`[\u98DE\u5F71] \u4EFB\u52A1\u6570: ${tasks.length}`);
+void loadSites().catch(() => void 0);
 process.on("unhandledRejection", (err) => {
   console.error("[\u98DE\u5F71] \u672A\u5904\u7406\u7684 Promise \u5F02\u5E38", err);
 });

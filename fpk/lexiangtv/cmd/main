@@ -1,0 +1,133 @@
+#!/bin/bash
+
+export PATH=/var/apps/nodejs_v22/target/bin:$PATH
+export NODE_ENV=production
+
+APP_DIR="${TRIM_APPDEST}/server"
+DATA_DIR="${TRIM_PKGVAR}/data"
+LOG_FILE="${TRIM_PKGVAR}/app.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+SOCKET_PATH="${TRIM_APPDEST}/app.sock"
+GATEWAY_PREFIX="/app/lexiangtv"
+TCP_PORT="${TCP_PORT:-8099}"
+
+log_msg() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+}
+
+check_process() {
+  kill -0 "$1" 2>/dev/null
+}
+
+status_app() {
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid="$(head -n 1 "$PID_FILE" | tr -d '[:space:]')"
+    if [ -n "$pid" ] && check_process "$pid"; then
+      return 0
+    fi
+    rm -f "$PID_FILE"
+  fi
+  return 1
+}
+
+start_app() {
+  if status_app; then
+    return 0
+  fi
+
+  mkdir -p "$DATA_DIR"
+
+  # 日志超过 5MB 时轮转
+  if [ -f "$LOG_FILE" ] && [ "$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)" -gt 5242880 ]; then
+    mv -f "$LOG_FILE" "${LOG_FILE}.1"
+  fi
+
+  # 用户授权目录 + 应用共享目录 + 自定义根目录清单
+  ROOTS=""
+  add_root() {
+    if [ -n "$1" ] && [ -d "$1" ]; then
+      case ":$ROOTS:" in
+        *":$1:"*) ;;
+        *) ROOTS="${ROOTS:+$ROOTS:}$1" ;;
+      esac
+    fi
+  }
+  IFS=':' read -ra PATHS <<< "${TRIM_DATA_ACCESSIBLE_PATHS}:${TRIM_DATA_SHARE_PATHS}"
+  for p in "${PATHS[@]}"; do
+    add_root "$p"
+  done
+
+  EXTRA_ROOTS_FILE="${TRIM_PKGETC}/extra-roots"
+  if [ -f "$EXTRA_ROOTS_FILE" ]; then
+    while IFS= read -r line; do
+      case "$line" in
+        ''|\#*) continue ;;
+      esac
+      add_root "$line"
+    done < "$EXTRA_ROOTS_FILE"
+  fi
+
+  if [ -z "$ROOTS" ]; then
+    mkdir -p "${DATA_DIR}/downloads"
+    ROOTS="${DATA_DIR}/downloads"
+  fi
+
+  log_msg "Starting 乐享TV, roots=$ROOTS"
+  cd "$APP_DIR" || exit 1
+  DATA_DIR="$DATA_DIR" \
+  DOWNLOAD_ROOTS="$ROOTS" \
+  SOCKET_PATH="$SOCKET_PATH" \
+  GATEWAY_PREFIX="$GATEWAY_PREFIX" \
+  TCP_PORT="$TCP_PORT" \
+  HOST=0.0.0.0 \
+    nohup node server.mjs >> "$LOG_FILE" 2>&1 &
+
+  echo "$!" > "$PID_FILE"
+  sleep 1
+  if status_app; then
+    return 0
+  fi
+  echo "服务启动失败，请查看日志 $LOG_FILE" > "$TRIM_TEMP_LOGFILE"
+  return 1
+}
+
+stop_app() {
+  log_msg "Stopping 乐享TV..."
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid="$(head -n 1 "$PID_FILE" | tr -d '[:space:]')"
+    if [ -n "$pid" ] && check_process "$pid"; then
+      kill -TERM "$pid" 2>> "$LOG_FILE" || true
+      local count=0
+      while check_process "$pid" && [ "$count" -lt 10 ]; do
+        sleep 1
+        count=$((count + 1))
+      done
+      if check_process "$pid"; then
+        kill -KILL "$pid" 2>> "$LOG_FILE" || true
+      fi
+    fi
+  fi
+  rm -f "$PID_FILE"
+  rm -f "$SOCKET_PATH"
+}
+
+case "$1" in
+  start)
+    start_app
+    ;;
+  stop)
+    stop_app
+    ;;
+  status)
+    if status_app; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "Unknown command: $1" > "$TRIM_TEMP_LOGFILE"
+    exit 1
+    ;;
+esac

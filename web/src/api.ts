@@ -1,7 +1,15 @@
 import type { DownloadTask } from '../../shared/types.ts';
 
+const BASE = import.meta.env.BASE_URL || '/';
+
+/** 同时兼容根路径与飞牛统一网关前缀（/app/lexiangtv/） */
+export function appUrl(path: string): string {
+  const clean = path.replace(/^\/+/, '');
+  return `${BASE.replace(/\/+$/, '')}/${clean}`;
+}
+
 export async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(appUrl(path), {
     ...init,
     headers: {
       'Content-Type': 'application/json',

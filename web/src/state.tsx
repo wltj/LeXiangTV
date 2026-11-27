@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { AppSettings, DownloadTask, SettingsResponse } from '../../shared/types.ts';
-import { api } from './api.ts';
+import { api, appUrl } from './api.ts';
 
 interface SettingsContextValue {
   settings: SettingsResponse | null;
@@ -140,7 +140,7 @@ export function useTaskStream(): { tasks: DownloadTask[]; connected: boolean } {
       })
       .catch(() => undefined);
 
-    const es = new EventSource('/api/events');
+    const es = new EventSource(appUrl('/api/events'));
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
     es.onmessage = (ev) => {

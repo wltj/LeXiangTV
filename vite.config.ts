@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   root: 'web',
+  base: process.env.VITE_BASE || '/',
   plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
@@ -15,7 +16,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../dist/public',
+    outDir: process.env.VITE_OUT_DIR || '../dist/public',
     emptyOutDir: true,
   },
 });

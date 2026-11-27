@@ -2,7 +2,9 @@ node_modules/
 data/
 downloads/
 media/
+dist-fpk/
 .tools/
+vibe_images/
 *.log
 .env
 .DS_Store

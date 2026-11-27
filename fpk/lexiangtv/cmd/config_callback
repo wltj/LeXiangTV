@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# 配置变更（如授权目录调整）后重启服务，让新的目录列表生效
+DIR="$(cd "$(dirname "$0")" && pwd)"
+"$DIR/main" stop >/dev/null 2>&1
+"$DIR/main" start
+exit $?

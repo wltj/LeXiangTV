@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Check, Download, FolderOpen, Layers, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import type { ProbeResult, SearchItem, VodDetail } from '../../../shared/types.ts';
-import { api, humanBytes, sanitizeFileName } from '../api.ts';
+import { api, appUrl, humanBytes, sanitizeFileName } from '../api.ts';
 import { useSettings, useToast } from '../state.tsx';
 import { FolderPicker, Modal, ModalHeader, ProgressBar, Spinner } from './ui.tsx';
 
@@ -196,7 +196,7 @@ export function DetailModal({
                 <div className="relative hidden h-[150px] w-[100px] shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] sm:block">
                   {detail.pic ? (
                     <img
-                      src={`/api/img?url=${encodeURIComponent(detail.pic)}&ref=${encodeURIComponent(detail.referer)}`}
+                      src={appUrl(`/api/img?url=${encodeURIComponent(detail.pic)}&ref=${encodeURIComponent(detail.referer)}`)}
                       alt={detail.name}
                       className="h-full w-full object-cover"
                       onError={(e) => {

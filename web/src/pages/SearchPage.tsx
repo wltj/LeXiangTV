@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Film, Layers, Loader2, Search, Server, Sparkles, Tv, Zap } from 'lucide-react';
 import type { SearchEvent, SearchItem } from '../../../shared/types.ts';
 import { useSettings, useToast } from '../state.tsx';
+import { appUrl } from '../api.ts';
 import { DetailModal } from '../components/DetailModal.tsx';
 
 export function SearchPage() {
@@ -39,7 +40,7 @@ export function SearchPage() {
     setSrcFilter('all');
     setLoading(true);
 
-    const es = new EventSource(`/api/search/stream?wd=${encodeURIComponent(q)}`);
+    const es = new EventSource(appUrl(`/api/search/stream?wd=${encodeURIComponent(q)}`));
     esRef.current = es;
     es.onmessage = (ev) => {
       let data: SearchEvent | { type: 'fatal'; error: string };
@@ -276,7 +277,7 @@ function Feature({ icon, title, desc }: { icon: React.ReactNode; title: string; 
 }
 
 function PosterCard({ item, onOpen }: { item: SearchItem; onOpen: () => void }) {
-  const [src, setSrc] = useState(item.pic ? `/api/img?url=${encodeURIComponent(item.pic)}` : '');
+  const [src, setSrc] = useState(item.pic ? appUrl(`/api/img?url=${encodeURIComponent(item.pic)}`) : '');
   const [broken, setBroken] = useState(!item.pic);
   const [triedDirect, setTriedDirect] = useState(false);
 

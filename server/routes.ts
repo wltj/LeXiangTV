@@ -23,6 +23,19 @@ import { fetchRaw } from './http.ts';
 export function createApp(): Express {
   const app = express();
   app.disable('x-powered-by');
+
+  const gatewayPrefix = (process.env.GATEWAY_PREFIX || '').replace(/\/+$/, '');
+  if (gatewayPrefix) {
+    app.use((req, _res, next) => {
+      const url = req.url;
+      if (url === gatewayPrefix || url.startsWith(`${gatewayPrefix}/`) || url.startsWith(`${gatewayPrefix}?`)) {
+        const rest = url.slice(gatewayPrefix.length);
+        req.url = rest === '' ? '/' : rest.startsWith('?') ? `/${rest}` : rest;
+      }
+      next();
+    });
+  }
+
   app.use(express.json({ limit: '4mb' }));
 
   app.get('/api/health', (_req, res) => {

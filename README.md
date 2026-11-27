@@ -23,6 +23,7 @@
 - 下载完成自动用 ffmpeg 合并为 MP4（无 ffmpeg 时回退为 TS 直接拼接）
 - 任务暂停 / 继续 / 重试 / 重新解析，实时进度与速度
 - 目录浏览与新建文件夹，下载路径自由选择
+- 可作为飞牛 fnOS 原生应用（`.fpk`）安装，飞牛桌面图标直接打开
 - 暗色现代简约 Web 界面，适配桌面与手机
 
 ## 技术栈
@@ -62,7 +63,46 @@ npm run dev:web        # 前端 :5173，自动代理 /api
 
 UI 中只能选择 `DOWNLOAD_ROOTS` 下的子目录，避免路径逃逸。
 
-## Docker 部署（飞牛 OS 推荐）
+## 飞牛 OS 原生应用（推荐）
+
+项目可直接打包为飞牛 fnOS 应用（`.fpk`），安装后出现在飞牛桌面，点开即在飞牛桌面窗口内使用，不走单独的 PC 网页。
+
+### 安装
+
+1. 在飞牛「应用中心」安装 **Node.js v22**（分类：开发工具），本项目依赖该运行时。
+2. 下载 [release/lexiangtv-1.0.2.fpk](release/lexiangtv-1.0.2.fpk)，或自行构建（见下）。
+3. 飞牛桌面 → 应用中心 → 右上角「设置」→「手动安装应用」，选择 `.fpk` 文件。
+4. 安装完成后，飞牛桌面会出现「乐享TV」图标，点开即可使用。
+
+应用通过飞牛统一网关（`/app/lexiangtv/` + `app.sock`）提供页面，同时监听 `8099` 端口，便于局域网内其他设备直接访问。
+
+### 下载目录
+
+- 安装时会创建应用共享目录：`/vol1/@appshare/lexiangtv/downloads`（文件管理可见），作为默认下载位置。
+- 推荐在「应用中心 → 乐享TV → 应用设置 → 授权目录」中添加你的媒体文件夹，应用会自动读取 `TRIM_DATA_ACCESSIBLE_PATHS`。
+- 若当前系统版本没有该入口，可用下面的备用方式（已验证）：先给应用用户授予目录 ACL，再写入 `extra-roots` 清单，然后重启应用。
+
+```bash
+# 以 /vol1/1000/影视 为例
+sudo /usr/trim/bin/trimacl -m "a:u:$(id -u lexiangtv):rwxpdDaAeEcCo:sfd" "/vol1/1000/影视"
+echo "/vol1/1000/影视" | sudo tee /vol1/@appconf/lexiangtv/extra-roots
+sudo appcenter-cli stop lexiangtv && sudo appcenter-cli start lexiangtv
+```
+
+### 构建 fpk
+
+```bash
+npm install
+npm run build:fpk        # 前端(base=/app/lexiangtv/) + 服务端 + 组装到 fpk/lexiangtv/app
+cd fpk/lexiangtv
+fnpack build             # 飞牛自带 fnpack，也可从官方开发者站下载
+```
+
+生成的 `lexiangtv.fpk` 可在应用中心手动安装。应用数据位于 `/vol1/@appdata/lexiangtv/data`，升级前建议备份。
+
+> 说明：部分版本的应用中心通过 `appcenter-cli install-fpk` 覆盖安装时不会更新生命周期脚本。升级时可先备份 `/vol1/@appdata/lexiangtv`，卸载后重新安装；或手动替换 `/vol1/@appcenter/lexiangtv/server` 后重启应用。
+
+## Docker 部署（可选）
 
 ```bash
 # 在仓库目录中
@@ -113,6 +153,8 @@ server/          后端：接口聚合、HLS 解析、下载引擎、API
 shared/          前后端共享类型
 web/             React 前端
 scripts/         构建脚本
+fpk/lexiangtv/   飞牛 fnOS 应用包工程（含预构建 app/server）
+release/         已构建的 .fpk 安装包
 Dockerfile       生产镜像
 docker-compose.yml
 ```
