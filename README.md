@@ -83,6 +83,9 @@ sudo docker compose up -d --build
 
 访问 `http://NAS_IP:8099`。
 
+> 仓库内已提交预构建的 `dist/`，因此无需在 NAS 上安装 Node 即可构建镜像。
+> 修改源码后请先在本机执行 `npm run build`，再将新的 `dist/` 提交。
+
 说明：
 
 - `./data` 保存配置与任务，`MEDIA_DIR` 映射到容器内 `/media`
