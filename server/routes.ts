@@ -37,6 +37,10 @@ export function createApp(): Express {
   }
 
   app.use(express.json({ limit: '4mb' }));
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });

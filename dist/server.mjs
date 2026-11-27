@@ -24770,10 +24770,12 @@ var configPath = path2.join(DATA_DIR, "config.json");
 var tasksPath = path2.join(DATA_DIR, "tasks.json");
 var PRESET_SOURCES = [
   { id: "preset-ffzy", name: "\u975E\u51E1\u8D44\u6E90", url: "https://api.ffzyapi.com/api.php/provide/vod", enabled: true },
-  { id: "preset-lzi", name: "\u91CF\u5B50\u8D44\u6E90", url: "https://cj.lziapi.com/api.php/provide/vod", enabled: true },
-  { id: "preset-dytt", name: "\u7535\u5F71\u5929\u5802\u8D44\u6E90", url: "https://caiji.dyttzyapi.com/api.php/provide/vod", enabled: true },
-  { id: "preset-guangsu", name: "\u5149\u901F\u8D44\u6E90", url: "https://api.guangsuapi.com/api.php/provide/vod", enabled: true },
-  { id: "preset-subo", name: "\u7D20\u535A\u8D44\u6E90", url: "https://subocaiji.com/api.php/provide/vod", enabled: true }
+  { id: "preset-mdzy", name: "\u9B54\u90FD\u8D44\u6E90", url: "https://www.mdzyapi.com/api.php/provide/vod", enabled: true },
+  { id: "preset-hongniu", name: "\u7EA2\u725B\u8D44\u6E90", url: "https://www.hongniuzy2.com/api.php/provide/vod", enabled: true },
+  { id: "preset-360", name: "360\u8D44\u6E90", url: "https://www.360zy.com/api.php/provide/vod", enabled: true },
+  { id: "preset-guangsu", name: "\u5149\u901F\u8D44\u6E90", url: "https://api.guangsuapi.com/api.php/provide/vod", enabled: false },
+  { id: "preset-ffzy2", name: "\u975E\u51E1\u5907\u7528", url: "https://ffzy.tv/api.php/provide/vod/", enabled: false },
+  { id: "preset-baidu", name: "\u767E\u5EA6\u8D44\u6E90", url: "https://api.apibdzy.com/api.php/provide/vod", enabled: false }
 ];
 function defaultSettings() {
   return {
@@ -26405,6 +26407,10 @@ function createApp() {
     });
   }
   app2.use(import_express.default.json({ limit: "4mb" }));
+  app2.use((req, res, next) => {
+    if (req.path.startsWith("/api/")) res.setHeader("Cache-Control", "no-store");
+    next();
+  });
   app2.get("/api/health", (_req, res) => {
     res.json({ ok: true });
   });

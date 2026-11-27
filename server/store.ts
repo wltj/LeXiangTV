@@ -13,10 +13,12 @@ const tasksPath = path.join(DATA_DIR, 'tasks.json');
 
 const PRESET_SOURCES: SourceConfig[] = [
   { id: 'preset-ffzy', name: '非凡资源', url: 'https://api.ffzyapi.com/api.php/provide/vod', enabled: true },
-  { id: 'preset-lzi', name: '量子资源', url: 'https://cj.lziapi.com/api.php/provide/vod', enabled: true },
-  { id: 'preset-dytt', name: '电影天堂资源', url: 'https://caiji.dyttzyapi.com/api.php/provide/vod', enabled: true },
-  { id: 'preset-guangsu', name: '光速资源', url: 'https://api.guangsuapi.com/api.php/provide/vod', enabled: true },
-  { id: 'preset-subo', name: '素博资源', url: 'https://subocaiji.com/api.php/provide/vod', enabled: true },
+  { id: 'preset-mdzy', name: '魔都资源', url: 'https://www.mdzyapi.com/api.php/provide/vod', enabled: true },
+  { id: 'preset-hongniu', name: '红牛资源', url: 'https://www.hongniuzy2.com/api.php/provide/vod', enabled: true },
+  { id: 'preset-360', name: '360资源', url: 'https://www.360zy.com/api.php/provide/vod', enabled: true },
+  { id: 'preset-guangsu', name: '光速资源', url: 'https://api.guangsuapi.com/api.php/provide/vod', enabled: false },
+  { id: 'preset-ffzy2', name: '非凡备用', url: 'https://ffzy.tv/api.php/provide/vod/', enabled: false },
+  { id: 'preset-baidu', name: '百度资源', url: 'https://api.apibdzy.com/api.php/provide/vod', enabled: false },
 ];
 
 function defaultSettings(): AppSettings {
