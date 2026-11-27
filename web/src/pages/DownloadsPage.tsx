@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -46,6 +46,11 @@ export function DownloadsPage({
   const [toDelete, setToDelete] = useState<DownloadTask | null>(null);
   const [deleteFile, setDeleteFile] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkDeleteFile, setBulkDeleteFile] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const allCheckboxRef = useRef<HTMLInputElement>(null);
 
   const sorted = useMemo(() => [...tasks].sort((a, b) => b.createdAt - a.createdAt), [tasks]);
 
@@ -70,6 +75,77 @@ export function DownloadsPage({
   const totalSpeed = tasks
     .filter((t) => t.status === 'downloading')
     .reduce((sum, t) => sum + (t.speed || 0), 0);
+
+  const selectableTasks = useMemo(
+    () => filtered.filter((t) => t.status === 'completed' || t.status === 'error'),
+    [filtered],
+  );
+  const allSelected = selectableTasks.length > 0 && selectableTasks.every((t) => selected.has(t.id));
+  const someSelected = selectableTasks.some((t) => selected.has(t.id));
+
+  useEffect(() => {
+    if (allCheckboxRef.current) allCheckboxRef.current.indeterminate = someSelected && !allSelected;
+  }, [someSelected, allSelected]);
+
+  useEffect(() => {
+    setSelected((prev) => {
+      const ids = new Set(tasks.map((t) => t.id));
+      const next = new Set<string>();
+      for (const id of prev) if (ids.has(id)) next.add(id);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [tasks]);
+
+  useEffect(() => {
+    setSelected(new Set());
+  }, [filter]);
+
+  function toggleAll() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const t of selectableTasks) next.delete(t.id);
+      } else {
+        for (const t of selectableTasks) next.add(t.id);
+      }
+      return next;
+    });
+  }
+
+  function toggleOne(id: string, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function confirmBulkDelete() {
+    const ids = [...selected].filter((id) => tasks.some((t) => t.id === id));
+    if (!ids.length) {
+      setBulkOpen(false);
+      return;
+    }
+    setBulkDeleting(true);
+    let ok = 0;
+    let fail = 0;
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          await api(`/api/tasks/${id}?file=${bulkDeleteFile ? '1' : '0'}`, { method: 'DELETE' });
+          ok++;
+        } catch {
+          fail++;
+        }
+      }),
+    );
+    setBulkDeleting(false);
+    setBulkOpen(false);
+    setSelected(new Set());
+    if (ok) toast.success(`已删除 ${ok} 条历史记录${bulkDeleteFile ? '及文件' : ''}`);
+    if (fail) toast.error(`${fail} 条删除失败`);
+  }
 
   async function action(fn: () => Promise<unknown>, okText?: string) {
     try {
@@ -147,6 +223,38 @@ export function DownloadsPage({
         ))}
       </div>
 
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <label
+          className={`flex select-none items-center gap-2 text-xs ${
+            selectableTasks.length ? 'cursor-pointer text-slate-400 hover:text-white' : 'cursor-not-allowed text-slate-600'
+          }`}
+        >
+          <input
+            ref={allCheckboxRef}
+            type="checkbox"
+            className="h-4 w-4 accent-emerald-400"
+            checked={allSelected}
+            disabled={!selectableTasks.length}
+            onChange={toggleAll}
+          />
+          全选历史
+          {selectableTasks.length ? <span className="text-[10px] opacity-60">({selectableTasks.length})</span> : null}
+        </label>
+        {selected.size > 0 ? (
+          <button
+            className="btn-danger h-9 px-3 py-1.5"
+            onClick={() => {
+              setBulkDeleteFile(false);
+              setBulkOpen(true);
+            }}
+          >
+            <Trash2 className="h-4 w-4" /> 删除历史记录 ({selected.size})
+          </button>
+        ) : (
+          <span className="text-[11px] text-slate-600">勾选已完成或出错的历史记录，可批量删除</span>
+        )}
+      </div>
+
       <div className="mt-3 space-y-2.5">
         {filtered.length === 0 ? (
           <div className="mt-12 flex flex-col items-center text-center">
@@ -168,6 +276,9 @@ export function DownloadsPage({
           <TaskRow
             key={task.id}
             task={task}
+            selectable={task.status === 'completed' || task.status === 'error'}
+            selected={selected.has(task.id)}
+            onSelect={(checked) => toggleOne(task.id, checked)}
             onPause={() => void action(() => api(`/api/tasks/${task.id}/pause`, { method: 'POST', body: '{}' }))}
             onResume={() => void action(() => api(`/api/tasks/${task.id}/resume`, { method: 'POST', body: '{}' }))}
             onRetry={() =>
@@ -204,6 +315,26 @@ export function DownloadsPage({
           toast.success(`已创建 ${n} 个下载任务`);
         }}
       />
+
+      <ConfirmDialog
+        open={bulkOpen}
+        title="删除历史下载记录"
+        description={`确定删除选中的 ${selected.size} 条历史记录吗？`}
+        confirmText={bulkDeleteFile ? '删除记录和文件' : '删除记录'}
+        busy={bulkDeleting}
+        onConfirm={() => void confirmBulkDelete()}
+        onClose={() => setBulkOpen(false)}
+      >
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2.5 text-xs text-slate-300">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-rose-400"
+            checked={bulkDeleteFile}
+            onChange={(e) => setBulkDeleteFile(e.target.checked)}
+          />
+          同时删除本地视频文件（仅对已完成的成片生效）
+        </label>
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={!!toDelete}
@@ -252,6 +383,9 @@ function StatCard({
 
 function TaskRow({
   task,
+  selectable,
+  selected,
+  onSelect,
   onPause,
   onResume,
   onRetry,
@@ -260,6 +394,9 @@ function TaskRow({
   onCopy,
 }: {
   task: DownloadTask;
+  selectable: boolean;
+  selected: boolean;
+  onSelect: (checked: boolean) => void;
   onPause: () => void;
   onResume: () => void;
   onRetry: () => void;
@@ -273,8 +410,18 @@ function TaskRow({
   const eta = taskRemainingTime(task);
 
   return (
-    <div className="panel panel-hover p-4">
+    <div className={`panel panel-hover p-4 ${selected ? 'ring-1 ring-emerald-400/25' : ''}`}>
       <div className="flex items-start gap-3">
+        <span className="mt-3 flex h-4 w-4 shrink-0 items-center justify-center">
+          {selectable ? (
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-emerald-400"
+              checked={selected}
+              onChange={(e) => onSelect(e.target.checked)}
+            />
+          ) : null}
+        </span>
         <div
           className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.03] ${meta.color}`}
         >
