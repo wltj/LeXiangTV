@@ -359,9 +359,21 @@ async function parseOneConfig(json: unknown, source: { id: string; name: string;
 
 async function loadOneSource(source: { id: string; name: string; url: string }): Promise<ParsedConfig> {
   const { json } = await fetchConfigJson(source.url, 15000);
-  const first = await parseOneConfig(json, source);
-  const multi = json && typeof json === 'object' && Array.isArray((json as Record<string, unknown>).urls);
-  if (!multi) return first;
+  const multi =
+    json !== null &&
+    typeof json === 'object' &&
+    Array.isArray((json as Record<string, unknown>).urls);
+  if (!multi) {
+    return parseOneConfig(json, source);
+  }
+
+  // 纯多仓配置本身可能没有 sites；自身站点若是纯 Spider 也不影响子仓加载
+  let first: ParsedConfig = { name: source.name, sites: [] };
+  try {
+    first = await parseOneConfig(json, source);
+  } catch {
+    // 多仓主配置只负责 url 列表，忽略自身站点错误
+  }
 
   const urls = (json as Record<string, unknown>).urls as unknown[];
   const subs = urls
@@ -392,6 +404,28 @@ async function loadSubConfig(url: string, source: { id: string; name: string; ur
   return parseOneConfig(json, source);
 }
 
+function apiDedupeKey(api: string): string {
+  try {
+    const u = new URL(api);
+    for (const k of ['ac', 'wd', 'pg', 'ids', 'at']) u.searchParams.delete(k);
+    const path = u.pathname.replace(/\/+$/, '');
+    const params = [...u.searchParams.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const qs = new URLSearchParams(params).toString();
+    const host = u.host.toLowerCase().replace(/^www\./, '');
+    return `${host}${path}${qs ? `?${qs}` : ''}`;
+  } catch {
+    return api.replace(/\/+$/, '').toLowerCase();
+  }
+}
+
+export async function collectSitesFromConfig(
+  url: string,
+  name: string,
+): Promise<SiteRecord[]> {
+  const parsed = await loadOneSource({ id: 'import', name, url });
+  return parsed.sites;
+}
+
 export async function loadSites(force = false): Promise<{
   sites: SiteRecord[];
   errors: Array<{ sourceId: string; name: string; error: string }>;
@@ -406,11 +440,15 @@ export async function loadSites(force = false): Promise<{
     const sites: SiteRecord[] = [];
     const errors: Array<{ sourceId: string; name: string; error: string }> = [];
     const seen = new Set<string>();
+    const seenApis = new Set<string>();
     results.forEach((r, i) => {
       if (r.status === 'fulfilled') {
         for (const site of r.value.sites) {
           if (seen.has(site.key)) continue;
+          const apiKey = apiDedupeKey(site.api);
+          if (seenApis.has(apiKey)) continue;
           seen.add(site.key);
+          seenApis.add(apiKey);
           sites.push(site);
           registry.set(site.key, site);
         }

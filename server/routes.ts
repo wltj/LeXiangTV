@@ -18,6 +18,7 @@ import {
   resumeTask,
   retryTask,
 } from './downloader.ts';
+import { cancelImportJob, getImportJob, startImport } from './importer.ts';
 import { fetchRaw } from './http.ts';
 
 export function createApp(): Express {
@@ -68,6 +69,33 @@ export function createApp(): Express {
 
   app.get('/api/presets', (_req, res) => {
     res.json({ presets: getPresets() });
+  });
+
+  app.post('/api/import', (req, res) => {
+    try {
+      const job = startImport(String(req.body?.url ?? ''), req.body?.autoAdd !== false);
+      res.json({ job });
+    } catch (err) {
+      res.status(400).json({ error: (err as Error)?.message || '启动导入失败' });
+    }
+  });
+
+  app.get('/api/import/:id', (req, res) => {
+    const job = getImportJob(req.params.id);
+    if (!job) {
+      res.status(404).json({ error: '导入任务不存在或已过期' });
+      return;
+    }
+    res.json({ job });
+  });
+
+  app.post('/api/import/:id/cancel', (req, res) => {
+    const ok = cancelImportJob(req.params.id);
+    if (!ok) {
+      res.status(404).json({ error: '导入任务不存在或已过期' });
+      return;
+    }
+    res.json({ ok: true });
   });
 
   app.post('/api/sources/test', async (req, res) => {

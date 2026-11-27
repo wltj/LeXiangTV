@@ -19469,14 +19469,14 @@ var require_etag = __commonJS({
   "node_modules/etag/index.js"(exports, module) {
     "use strict";
     module.exports = etag;
-    var crypto3 = __require("crypto");
+    var crypto4 = __require("crypto");
     var Stats = __require("fs").Stats;
     var toString = Object.prototype.toString;
     function entitytag(entity) {
       if (entity.length === 0) {
         return '"0-2jmj7l5rSw0yVb/vlWAYkK/YBwk"';
       }
-      var hash = crypto3.createHash("sha1").update(entity, "utf8").digest("base64").substring(0, 27);
+      var hash = crypto4.createHash("sha1").update(entity, "utf8").digest("base64").substring(0, 27);
       var len = typeof entity === "string" ? Buffer.byteLength(entity, "utf8") : entity.length;
       return '"' + len.toString(16) + "-" + hash + '"';
     }
@@ -23235,17 +23235,17 @@ var require_dist3 = __commonJS({
 // node_modules/cookie-signature/index.js
 var require_cookie_signature = __commonJS({
   "node_modules/cookie-signature/index.js"(exports) {
-    var crypto3 = __require("crypto");
+    var crypto4 = __require("crypto");
     exports.sign = function(val, secret) {
       if ("string" != typeof val) throw new TypeError("Cookie value must be provided as a string.");
       if (null == secret) throw new TypeError("Secret key must be provided.");
-      return val + "." + crypto3.createHmac("sha256", secret).update(val).digest("base64").replace(/\=+$/, "");
+      return val + "." + crypto4.createHmac("sha256", secret).update(val).digest("base64").replace(/\=+$/, "");
     };
     exports.unsign = function(input, secret) {
       if ("string" != typeof input) throw new TypeError("Signed cookie string must be provided.");
       if (null == secret) throw new TypeError("Secret key must be provided.");
       var tentativeValue = input.slice(0, input.lastIndexOf(".")), expectedInput = exports.sign(tentativeValue, secret), expectedBuffer = Buffer.from(expectedInput), inputBuffer = Buffer.from(input);
-      return expectedBuffer.length === inputBuffer.length && crypto3.timingSafeEqual(expectedBuffer, inputBuffer) ? tentativeValue : false;
+      return expectedBuffer.length === inputBuffer.length && crypto4.timingSafeEqual(expectedBuffer, inputBuffer) ? tentativeValue : false;
     };
   }
 });
@@ -24773,6 +24773,9 @@ var PRESET_SOURCES = [
   { id: "preset-mdzy", name: "\u9B54\u90FD\u8D44\u6E90", url: "https://www.mdzyapi.com/api.php/provide/vod", enabled: true },
   { id: "preset-hongniu", name: "\u7EA2\u725B\u8D44\u6E90", url: "https://www.hongniuzy2.com/api.php/provide/vod", enabled: true },
   { id: "preset-360", name: "360\u8D44\u6E90", url: "https://www.360zy.com/api.php/provide/vod", enabled: true },
+  { id: "preset-cxkj", name: "\u521B\u4EAB\u8D44\u6E90", url: "https://ys.cxkjg.cn/api/provide/vod/", enabled: true },
+  { id: "preset-yyzy", name: "\u4F18\u8D28\u8D44\u6E90", url: "https://api.yyzy-tv.vip/inc/apijson.php", enabled: true },
+  { id: "preset-taopian", name: "\u6DD8\u7247\u8D44\u6E90", url: "https://taopianapi.com/cjapi/mc/vod/json.html", enabled: true },
   { id: "preset-guangsu", name: "\u5149\u901F\u8D44\u6E90", url: "https://api.guangsuapi.com/api.php/provide/vod", enabled: false },
   { id: "preset-ffzy2", name: "\u975E\u51E1\u5907\u7528", url: "https://ffzy.tv/api.php/provide/vod/", enabled: false },
   { id: "preset-baidu", name: "\u767E\u5EA6\u8D44\u6E90", url: "https://api.apibdzy.com/api.php/provide/vod", enabled: false }
@@ -25208,9 +25211,15 @@ async function parseOneConfig(json, source) {
 }
 async function loadOneSource(source) {
   const { json } = await fetchConfigJson(source.url, 15e3);
-  const first = await parseOneConfig(json, source);
-  const multi = json && typeof json === "object" && Array.isArray(json.urls);
-  if (!multi) return first;
+  const multi = json !== null && typeof json === "object" && Array.isArray(json.urls);
+  if (!multi) {
+    return parseOneConfig(json, source);
+  }
+  let first = { name: source.name, sites: [] };
+  try {
+    first = await parseOneConfig(json, source);
+  } catch {
+  }
   const urls = json.urls;
   const subs = urls.map((u) => {
     if (typeof u === "string") return { url: u.trim(), name: source.name };
@@ -25235,6 +25244,23 @@ async function loadSubConfig(url, source) {
   const { json } = await fetchConfigJson(url, 12e3);
   return parseOneConfig(json, source);
 }
+function apiDedupeKey(api) {
+  try {
+    const u = new URL(api);
+    for (const k of ["ac", "wd", "pg", "ids", "at"]) u.searchParams.delete(k);
+    const path5 = u.pathname.replace(/\/+$/, "");
+    const params = [...u.searchParams.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const qs = new URLSearchParams(params).toString();
+    const host = u.host.toLowerCase().replace(/^www\./, "");
+    return `${host}${path5}${qs ? `?${qs}` : ""}`;
+  } catch {
+    return api.replace(/\/+$/, "").toLowerCase();
+  }
+}
+async function collectSitesFromConfig(url, name) {
+  const parsed = await loadOneSource({ id: "import", name, url });
+  return parsed.sites;
+}
 async function loadSites(force = false) {
   const key = JSON.stringify(settings.sources.filter((s) => s.enabled).map((s) => [s.id, s.url]));
   if (!force && cacheResult && key === cacheKey && Date.now() - cacheAt < CACHE_TTL) return cacheResult;
@@ -25245,11 +25271,15 @@ async function loadSites(force = false) {
     const sites = [];
     const errors = [];
     const seen = /* @__PURE__ */ new Set();
+    const seenApis = /* @__PURE__ */ new Set();
     results.forEach((r, i) => {
       if (r.status === "fulfilled") {
         for (const site of r.value.sites) {
           if (seen.has(site.key)) continue;
+          const apiKey2 = apiDedupeKey(site.api);
+          if (seenApis.has(apiKey2)) continue;
           seen.add(site.key);
+          seenApis.add(apiKey2);
           sites.push(site);
           registry.set(site.key, site);
         }
@@ -26391,6 +26421,290 @@ function fileExt(url, contentType) {
   return ".mp4";
 }
 
+// server/importer.ts
+import crypto3 from "node:crypto";
+var jobs = /* @__PURE__ */ new Map();
+var TEST_KEYWORDS = ["\u6D41\u6D6A\u5730\u7403", "\u5E86\u4F59\u5E74"];
+var CONCURRENCY = 8;
+var REQUEST_TIMEOUT = 1e4;
+var MAX_SITES = 120;
+var MAX_ADD = 12;
+var BLOCKED_NAME = /(成人|色情|情色|色欲|老色|麻豆|探花|约炮|里番|无码|中出|自拍|巨乳|学生妹|少妇|福利姬|外围|楼凤|海角|黑料|91视频|成人片|av女|艾旦|lovedan)/i;
+function shortHash2(input) {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+function apiKey(api) {
+  try {
+    const u = new URL(api);
+    for (const k of ["ac", "wd", "pg", "ids", "at"]) u.searchParams.delete(k);
+    const path5 = u.pathname.replace(/\/+$/, "");
+    const params = [...u.searchParams.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const qs = new URLSearchParams(params).toString();
+    const host = u.host.toLowerCase().replace(/^www\./, "");
+    return `${host}${path5}${qs ? `?${qs}` : ""}`;
+  } catch {
+    return api.replace(/\/+$/, "").toLowerCase();
+  }
+}
+function cleanApiUrl(api) {
+  try {
+    const u = new URL(api);
+    for (const k of ["ac", "wd", "pg", "ids", "at"]) u.searchParams.delete(k);
+    return u.toString().replace(/\?$/, "");
+  } catch {
+    return api;
+  }
+}
+function cleanSourceName(name, api) {
+  const cleaned = name.replace(/^[^\p{L}\p{N}]+/u, "").replace(/\s+/g, " ").trim().slice(0, 24).replace(/^\d+\s*[-、.．]\s*/, "");
+  const generic = /^(导入接口|导入源|接口|test|测试)$/i.test(cleaned);
+  if (cleaned && !generic) return cleaned;
+  try {
+    return new URL(api).hostname.replace(/^www\./, "").slice(0, 24);
+  } catch {
+    return "\u5BFC\u5165\u6E90";
+  }
+}
+function uniqueSourceName(base, existing) {
+  const names = new Set(existing.map((s) => s.name.toLowerCase()));
+  if (!names.has(base.toLowerCase())) return base;
+  for (let i = 2; i < 50; i++) {
+    const candidate = `${base} ${i}`;
+    if (!names.has(candidate.toLowerCase())) return candidate;
+  }
+  return `${base} ${Date.now() % 1e3}`;
+}
+async function searchList(api, keyword, headers, ac) {
+  const url = buildCmsUrl(api, { ac, wd: keyword, pg: 1 });
+  const { text } = await fetchText(url, { headers, timeoutMs: REQUEST_TIMEOUT });
+  const payload = parseLooseJson(text);
+  return Array.isArray(payload.list) ? payload.list : [];
+}
+async function fetchDetail(api, id, headers) {
+  const url = buildCmsUrl(api, { ac: "detail", ids: id });
+  const { text } = await fetchText(url, { headers, timeoutMs: REQUEST_TIMEOUT });
+  const payload = parseLooseJson(text);
+  const item = Array.isArray(payload.list) ? payload.list[0] : void 0;
+  if (!item) return { m3u8: 0, httpLinks: 0 };
+  const lines = parseLines(String(item.vod_play_from ?? ""), String(item.vod_play_url ?? ""));
+  let m3u8 = 0;
+  let httpLinks = 0;
+  for (const line of lines) {
+    for (const ep of line.episodes) {
+      if (!/^https?:\/\//i.test(ep.url)) continue;
+      httpLinks++;
+      if (/\.m3u8/i.test(ep.url)) m3u8++;
+    }
+  }
+  return { m3u8, httpLinks };
+}
+async function testSite(site, keywords) {
+  const api = cleanApiUrl(site.api);
+  const headers = siteHeaders(site);
+  const started = Date.now();
+  let searchOk = 0;
+  let lastError = "";
+  for (const keyword of keywords) {
+    if (Date.now() - started > 45e3) break;
+    try {
+      let list = await searchList(api, keyword, headers, "detail");
+      if (!list.length) list = await searchList(api, keyword, headers, "videolist");
+      if (!list.length) {
+        lastError = "\u641C\u7D22\u65E0\u7ED3\u679C";
+        continue;
+      }
+      searchOk++;
+      const item = list.find((x) => x.vod_id !== void 0) ?? list[0];
+      const id = String(item.vod_id ?? "");
+      if (!id) {
+        lastError = "\u641C\u7D22\u7ED3\u679C\u7F3A\u5C11 vod_id";
+        continue;
+      }
+      const detail = await fetchDetail(api, id, headers);
+      if (detail.m3u8 > 0) {
+        return {
+          ok: true,
+          m3u8: detail.m3u8,
+          httpLinks: detail.httpLinks,
+          searchOk,
+          ms: Date.now() - started,
+          error: ""
+        };
+      }
+      lastError = `\u8BE6\u60C5 ${detail.httpLinks} \u4E2A\u94FE\u63A5 / 0 \u4E2A m3u8`;
+    } catch (err) {
+      lastError = err.message;
+    }
+  }
+  return {
+    ok: false,
+    m3u8: 0,
+    httpLinks: 0,
+    searchOk,
+    ms: Date.now() - started,
+    error: lastError || "\u672A\u627E\u5230\u53EF\u7528 m3u8"
+  };
+}
+function snapshot(job) {
+  const { cancel: _cancel, ...rest } = job;
+  return JSON.parse(JSON.stringify(rest));
+}
+async function runImport(job) {
+  try {
+    job.phase = "\u52A0\u8F7D\u914D\u7F6E\u4E0E\u591A\u4ED3\u5B50\u63A5\u53E3";
+    const sites = await collectSitesFromConfig(job.url, "\u5BFC\u5165\u63A5\u53E3");
+    const seenApis = /* @__PURE__ */ new Set();
+    const unique = [];
+    for (const site of sites) {
+      const key = apiKey(site.api);
+      if (seenApis.has(key)) continue;
+      seenApis.add(key);
+      unique.push(site);
+      if (unique.length >= MAX_SITES) break;
+    }
+    job.total = unique.length;
+    job.status = "testing";
+    job.phase = `\u5DF2\u63D0\u53D6 ${unique.length} \u4E2A\u76F4\u8FDE\u7AD9\uFF0C\u5F00\u59CB\u6D4B\u8BD5`;
+    if (!unique.length) {
+      job.errors.push("\u6CA1\u6709\u63D0\u53D6\u5230\u76F4\u8FDE\u91C7\u96C6\u7AD9\uFF08\u914D\u7F6E\u53EF\u80FD\u5168\u90E8\u662F Spider/\u52A0\u5BC6\u6E90\u6216\u5DF2\u5931\u6548\uFF09");
+      job.status = "error";
+      return;
+    }
+    const existingApis = new Set(settings.sources.map((s) => apiKey(s.url)));
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(CONCURRENCY, unique.length) }, async () => {
+      while (true) {
+        if (job.cancel || cursor >= unique.length) return;
+        const site = unique[cursor++];
+        const name = cleanSourceName(site.name, site.api);
+        const key = apiKey(site.api);
+        if (existingApis.has(key)) {
+          job.results.push({
+            name,
+            api: cleanApiUrl(site.api),
+            ok: false,
+            added: false,
+            m3u8: 0,
+            httpLinks: 0,
+            searchOk: 0,
+            ms: 0,
+            skipped: true,
+            reason: "\u5DF2\u5728\u914D\u7F6E\u4E2D"
+          });
+          job.tested++;
+          continue;
+        }
+        if (BLOCKED_NAME.test(site.name) || BLOCKED_NAME.test(site.api)) {
+          job.results.push({
+            name,
+            api: cleanApiUrl(site.api),
+            ok: false,
+            added: false,
+            m3u8: 0,
+            httpLinks: 0,
+            searchOk: 0,
+            ms: 0,
+            skipped: true,
+            reason: "\u7591\u4F3C\u6210\u4EBA/\u4E0D\u9002\u5185\u5BB9\uFF0C\u5DF2\u8DF3\u8FC7"
+          });
+          job.tested++;
+          continue;
+        }
+        const tested = await testSite(site, TEST_KEYWORDS);
+        job.tested++;
+        job.results.push({
+          name,
+          api: cleanApiUrl(site.api),
+          added: false,
+          ...tested
+        });
+      }
+    });
+    await Promise.all(workers);
+    if (job.cancel) {
+      job.status = "cancelled";
+      job.phase = "\u5DF2\u53D6\u6D88";
+      return;
+    }
+    job.status = "done";
+    job.phase = "\u6D4B\u8BD5\u5B8C\u6210";
+    if (job.autoAdd) {
+      const candidates = job.results.filter((r) => r.ok && !r.skipped && !r.added).sort((a, b) => b.m3u8 - a.m3u8 || a.ms - b.ms).slice(0, MAX_ADD);
+      if (candidates.length) {
+        const sources = [...settings.sources];
+        const newSources = [];
+        for (const r of candidates) {
+          const key = apiKey(r.api);
+          if (sources.some((s) => apiKey(s.url) === key)) continue;
+          const source = {
+            id: `import-${shortHash2(key)}`,
+            name: uniqueSourceName(r.name, [...sources, ...newSources]),
+            url: cleanApiUrl(r.api),
+            enabled: true
+          };
+          newSources.push(source);
+          r.added = true;
+        }
+        if (newSources.length) {
+          saveSettings({ sources: [...sources, ...newSources] });
+          job.added = newSources;
+          void loadSites(true).catch(() => void 0);
+        }
+      }
+    }
+    job.results.sort((a, b) => {
+      if (a.added !== b.added) return a.added ? -1 : 1;
+      if (!!a.skipped !== !!b.skipped) return a.skipped ? 1 : -1;
+      if (a.ok !== b.ok) return a.ok ? -1 : 1;
+      return b.m3u8 - a.m3u8 || a.ms - b.ms;
+    });
+  } catch (err) {
+    job.status = "error";
+    job.phase = "\u5BFC\u5165\u5931\u8D25";
+    job.errors.push(err?.message || "\u5BFC\u5165\u5931\u8D25");
+  } finally {
+    job.finishedAt = Date.now();
+    setTimeout(() => jobs.delete(job.id), 30 * 60 * 1e3).unref?.();
+  }
+}
+function startImport(url, autoAdd) {
+  const cleaned = url.trim();
+  if (!/^https?:\/\//i.test(cleaned)) throw new Error("\u8BF7\u586B\u5199 http/https \u63A5\u53E3\u5730\u5740");
+  const job = {
+    id: crypto3.randomUUID(),
+    url: cleaned,
+    status: "loading",
+    phase: "\u51C6\u5907\u4E2D",
+    total: 0,
+    tested: 0,
+    autoAdd,
+    results: [],
+    added: [],
+    errors: [],
+    startedAt: Date.now(),
+    cancel: false
+  };
+  jobs.set(job.id, job);
+  void runImport(job);
+  return snapshot(job);
+}
+function getImportJob(id) {
+  const job = jobs.get(id);
+  return job ? snapshot(job) : null;
+}
+function cancelImportJob(id) {
+  const job = jobs.get(id);
+  if (!job) return false;
+  job.cancel = true;
+  job.phase = "\u6B63\u5728\u53D6\u6D88...";
+  return true;
+}
+
 // server/routes.ts
 function createApp() {
   const app2 = (0, import_express.default)();
@@ -26434,6 +26748,30 @@ function createApp() {
   });
   app2.get("/api/presets", (_req, res) => {
     res.json({ presets: getPresets() });
+  });
+  app2.post("/api/import", (req, res) => {
+    try {
+      const job = startImport(String(req.body?.url ?? ""), req.body?.autoAdd !== false);
+      res.json({ job });
+    } catch (err) {
+      res.status(400).json({ error: err?.message || "\u542F\u52A8\u5BFC\u5165\u5931\u8D25" });
+    }
+  });
+  app2.get("/api/import/:id", (req, res) => {
+    const job = getImportJob(req.params.id);
+    if (!job) {
+      res.status(404).json({ error: "\u5BFC\u5165\u4EFB\u52A1\u4E0D\u5B58\u5728\u6216\u5DF2\u8FC7\u671F" });
+      return;
+    }
+    res.json({ job });
+  });
+  app2.post("/api/import/:id/cancel", (req, res) => {
+    const ok = cancelImportJob(req.params.id);
+    if (!ok) {
+      res.status(404).json({ error: "\u5BFC\u5165\u4EFB\u52A1\u4E0D\u5B58\u5728\u6216\u5DF2\u8FC7\u671F" });
+      return;
+    }
+    res.json({ ok: true });
   });
   app2.post("/api/sources/test", async (req, res) => {
     const { url, name } = req.body ?? {};

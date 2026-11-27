@@ -167,8 +167,38 @@ export interface SearchDoneEvent {
 
 export type SearchEvent = SearchStartEvent | SearchResultsEvent | SearchErrorEvent | SearchDoneEvent;
 
-export interface CreateTaskInput {
+export interface ImportSiteResult {
+  name: string;
+  api: string;
+  ok: boolean;
+  added: boolean;
+  m3u8: number;
+  httpLinks: number;
+  searchOk: number;
+  ms: number;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+}
+
+export type ImportStatus = 'loading' | 'testing' | 'done' | 'error' | 'cancelled';
+
+export interface ImportJobSnapshot {
+  id: string;
   url: string;
+  status: ImportStatus;
+  phase: string;
+  total: number;
+  tested: number;
+  autoAdd: boolean;
+  results: ImportSiteResult[];
+  added: SourceConfig[];
+  errors: string[];
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface CreateTaskInput {  url: string;
   name?: string;
   root?: string;
   subdir?: string;

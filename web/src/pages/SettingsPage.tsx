@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -14,10 +14,16 @@ import {
   Wifi,
   XCircle,
 } from 'lucide-react';
-import type { SettingsResponse, SourceConfig, SourceTestResult } from '../../../shared/types.ts';
+import type {
+  ImportJobSnapshot,
+  ImportSiteResult,
+  SettingsResponse,
+  SourceConfig,
+  SourceTestResult,
+} from '../../../shared/types.ts';
 import { api } from '../api.ts';
 import { useSettings, useToast } from '../state.tsx';
-import { FolderPicker, Spinner, Switch } from '../components/ui.tsx';
+import { FolderPicker, ProgressBar, Spinner, Switch } from '../components/ui.tsx';
 
 interface TestState {
   loading?: boolean;
@@ -25,13 +31,18 @@ interface TestState {
 }
 
 export function SettingsPage() {
-  const { settings, save, saving } = useSettings();
+  const { settings, save, saving, reload } = useSettings();
   const toast = useToast();
   const [draft, setDraft] = useState<SettingsResponse | null>(null);
   const [dirty, setDirty] = useState(false);
   const [tests, setTests] = useState<Record<string, TestState>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
   const [addingPresets, setAddingPresets] = useState(false);
+  const [importUrl, setImportUrl] = useState('');
+  const [importAuto, setImportAuto] = useState(true);
+  const [importStarting, setImportStarting] = useState(false);
+  const [importJob, setImportJob] = useState<ImportJobSnapshot | null>(null);
+  const importNotified = useRef('');
 
   useEffect(() => {
     if (settings) {
@@ -39,6 +50,80 @@ export function SettingsPage() {
       setDirty(false);
     }
   }, [settings]);
+
+  const importRunning = importJob ? importJob.status === 'loading' || importJob.status === 'testing' : false;
+
+  useEffect(() => {
+    const job = importJob;
+    if (!job || !(job.status === 'loading' || job.status === 'testing')) return;
+    let alive = true;
+    const timer = window.setInterval(async () => {
+      try {
+        const { job: next } = await api<{ job: ImportJobSnapshot }>(`/api/import/${job.id}`);
+        if (!alive) return;
+        setImportJob(next);
+        const noticeKey = `${next.id}:${next.status}`;
+        if (next.status === 'done') {
+          if (importNotified.current === noticeKey) return;
+          importNotified.current = noticeKey;
+          window.clearInterval(timer);
+          if (next.added.length) {
+            toast.success(`导入完成，已添加 ${next.added.length} 个源`);
+            await reload();
+          } else {
+            toast.info('导入完成，没有新的可用源');
+          }
+        } else if (next.status === 'error') {
+          if (importNotified.current === noticeKey) return;
+          importNotified.current = noticeKey;
+          window.clearInterval(timer);
+          toast.error(next.errors[0] || '导入失败');
+        } else if (next.status === 'cancelled') {
+          if (importNotified.current === noticeKey) return;
+          importNotified.current = noticeKey;
+          window.clearInterval(timer);
+          toast.info('已取消导入');
+        }
+      } catch {
+        // 下一轮继续轮询
+      }
+    }, 1500);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [importJob, reload, toast]);
+
+  async function startImport() {
+    const url = importUrl.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      toast.error('请填写 http/https 接口地址');
+      return;
+    }
+    setImportStarting(true);
+    importNotified.current = '';
+    try {
+      const { job } = await api<{ job: ImportJobSnapshot }>('/api/import', {
+        method: 'POST',
+        body: JSON.stringify({ url, autoAdd: importAuto }),
+      });
+      setImportJob(job);
+      toast.info('已开始解析，正在测试直连源，请稍候...');
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setImportStarting(false);
+    }
+  }
+
+  async function cancelImport() {
+    if (!importJob) return;
+    try {
+      await api(`/api/import/${importJob.id}/cancel`, { method: 'POST' });
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
 
   if (!draft) {
     return (
@@ -153,6 +238,111 @@ export function SettingsPage() {
           </button>
         </div>
       </div>
+
+      <section className="panel mt-5 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <Sparkles className="h-4 w-4 text-emerald-300" /> 智能导入接口
+            </h2>
+            <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-slate-500">
+              粘贴 TVBox 单仓/多仓地址，自动展开子仓、提取直连采集站，并在 NAS 上实测搜索与 m3u8；可用的自动加入配置。
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-col gap-2 lg:flex-row">
+          <input
+            className="input min-w-0 flex-1"
+            placeholder="https://gitlab.com/noimank/tvbox/-/raw/main/tvboxmuti.json"
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            disabled={importRunning}
+          />
+          <div className="flex shrink-0 items-center gap-2">
+            <Switch checked={importAuto} onChange={setImportAuto} disabled={importRunning} />
+            <span className="text-xs text-slate-400">自动添加</span>
+            <button className="btn-primary shrink-0" onClick={() => void startImport()} disabled={importStarting || importRunning}>
+              {importStarting ? <Spinner /> : <Sparkles className="h-4 w-4" />}
+              解析并导入
+            </button>
+            {importRunning ? (
+              <button className="btn-ghost shrink-0" onClick={() => void cancelImport()}>
+                取消
+              </button>
+            ) : null}
+          </div>
+        </div>
+        <p className="field-hint">导入会自动保存并刷新接口列表，请先保存其他修改；Spider 型站点会自动跳过。</p>
+
+        {importJob ? (
+          <div className="mt-3 rounded-xl border border-white/[0.06] bg-black/15 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-slate-400">
+                {importRunning ? <Spinner /> : null}
+                <span>{importJob.phase}</span>
+              </div>
+              <span className="text-[11px] text-slate-500">
+                测试 {importJob.tested}/{importJob.total || '?'} · 可用{' '}
+                {importJob.results.filter((r) => r.ok).length} · 已添加 {importJob.added.length}
+              </span>
+            </div>
+            <ProgressBar
+              value={importJob.total ? importJob.tested / importJob.total : importRunning ? 0.02 : 1}
+              running={importRunning}
+              className="mt-2"
+            />
+            {importJob.errors.length ? (
+              <div className="mt-2 space-y-1 text-[11px] text-rose-300/90">
+                {importJob.errors.map((e, i) => (
+                  <div key={i}>{e}</div>
+                ))}
+              </div>
+            ) : null}
+            {importJob.added.length ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {importJob.added.map((s) => (
+                  <span key={s.id} className="rounded-md bg-emerald-400/10 px-2 py-1 text-[11px] text-emerald-300">
+                    {s.name}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {importJob.results.length ? (
+              <div className="mt-2 max-h-64 overflow-y-auto pr-1">
+                {importJob.results.map((r, i) => (
+                  <div key={`${r.api}-${i}`} className="border-t border-white/[0.04] py-1.5">
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span
+                        className={`w-12 shrink-0 ${
+                          r.added
+                            ? 'text-emerald-300'
+                            : r.skipped
+                              ? 'text-slate-500'
+                              : r.ok
+                                ? 'text-emerald-300/80'
+                                : 'text-rose-300/80'
+                        }`}
+                      >
+                        {r.added ? '已添加' : r.skipped ? '跳过' : r.ok ? '可用' : '失败'}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-slate-300" title={r.api}>
+                        {r.name}
+                      </span>
+                      <span className="shrink-0 text-slate-500">{r.m3u8 ? `${r.m3u8} m3u8` : ''}</span>
+                      <span className="w-12 shrink-0 text-right text-slate-600">
+                        {r.ms ? `${(r.ms / 1000).toFixed(1)}s` : ''}
+                      </span>
+                    </div>
+                    {r.reason || (!r.ok && r.error) ? (
+                      <div className="ml-14 truncate text-[10px] text-slate-600">{r.reason || r.error}</div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
 
       <section className="panel mt-5 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
