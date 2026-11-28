@@ -26095,6 +26095,12 @@ async function execute(task, rt) {
   const signal = rt.controller.signal;
   const headers = taskHeaders(task);
   try {
+    const existingPlan = await loadPlan(task.id);
+    if (existingPlan) {
+      task.kind = "hls";
+      await runHls(task, rt, headers);
+      return;
+    }
     const probe = await probeUrl(task.url, headers);
     task.kind = probe.kind;
     if (signal.aborted) throw new PauseError();
@@ -26308,6 +26314,8 @@ async function runFfmpeg(playlistFile, outFile, format) {
     "error",
     "-protocol_whitelist",
     "file,crypto,data",
+    "-allowed_extensions",
+    "ALL",
     "-i",
     playlistFile,
     "-c",
